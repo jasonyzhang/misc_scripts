@@ -1,0 +1,101 @@
+#!/usr/bin/python36
+"""
+Wrapper for common ffmpeg commands.
+"""
+import argparse
+import os.path as osp
+import subprocess
+
+
+def get_parser():
+    parser = argparse.ArgumentParser(description="Wrapper for ffmpeg.")
+    parser.add_argument("paths", nargs="+", help="Input paths followed by output")
+    parser.add_argument(
+        "--vstack", action="store_true", help="Vertically concatenates videos"
+    )
+    parser.add_argument(
+        "--hstack",
+        action="store_true",
+        help="Horizontally concatenates videos",
+    )
+    parser.add_argument(
+        "--resize",
+        default="",
+        help="Resize to given size. Specify using iw:ih. -1 as wildcard.",
+    )
+    parser.add_argument("--xstack", default="", help="Custom stack, eg 3x2.")
+    return parser
+
+
+def run(cmd):
+    print("Running:", " ".join(cmd))
+    subprocess.run(cmd)
+
+
+def main(args):
+    cmd = ["ffmpeg"]
+    inputs = args.paths[:-1]
+    n_inputs = len(inputs)
+    output = args.paths[-1]
+    extension = osp.splitext(output)[1]
+    for inp in inputs:
+        cmd.extend(["-i", inp])
+
+    if args.resize:
+        # TODO(@jason): Add support for odd image dimensions if using libx264
+        cmd.extend(["-filter:v", f'scale="{args.resize}" -c:a copy'])
+    elif args.vstack or args.hstack or args.xstack:
+        # Assume all videos have the same dimensions.
+        # TODO(@jason): Add support for xstack
+        # https://stackoverflow.com/questions/11552565/
+        filter_command = "".join(f"[{i}:v]" for i in range(n_inputs))
+        if args.vstack:
+            filter_command += f"vstack=inputs={n_inputs}[v]"
+        elif args.hstack:
+            filter_command += f"hstack=inputs={n_inputs}[v]"
+        elif args.xstack:
+            # should enter as NUM_ROWSxNUM_COLS, eg 3x2.
+            # videos will be placed in raster order.
+            # xstack syntax is unreadable lmao
+            # https://ffmpeg.org/ffmpeg-filters.html#xstack
+            num_rows, num_cols = args.xstack.split("x")
+            num_rows = int(num_rows)
+            num_cols = int(num_cols)
+
+            layouts = [[("", "") for _ in range(num_cols)] for _ in range(num_rows)]
+            for r in range(num_rows):
+                for c in range(num_cols):
+                    new_x = "0"
+                    new_y = "0"
+                    if r == 0 and c == 0:
+                        pass
+                    elif r == 0:
+                        new_x = layouts[r][c - 1][0] + f"+w{c - 1}"
+                    elif c == 0:
+                        new_y = layouts[r - 1][c][1] + f"+h{(r - 1) * num_rows}"
+                    else:
+                        new_x = layouts[r - 1][c][0]
+                        new_y = layouts[r][c - 1][1]
+                    layouts[r][c] = (new_x, new_y)
+            layouts_flat = [f"{x}_{y}" for sublist in layouts for x, y in sublist]
+            layout_string = "|".join(layouts_flat[:n_inputs])
+            filter_command += f"xstack=inputs={n_inputs}:layout={layout_string}[v]"
+
+        # https://stackoverflow.com/questions/56299365/
+        if extension == ".gif":
+            # Single palette for all frames
+            # filter_command += ",split[y][z];[y]palettegen[pal];[z][pal]paletteuse"
+
+            # Per-frame palette
+            filter_command += ",split[y]palettegen=stats_mode=single[pal];"
+            filter_command += "[z][pal]paletteuse=new=1"
+
+        cmd.extend(["-filter_complex", filter_command, "-map", "[v]"])
+        if extension == ".mp4":
+            cmd.extend(["-c:v", "libx264", "-crf", "20"])
+    cmd.append(output)
+    run(cmd)
+
+
+if __name__ == "__main__":
+    main(get_parser().parse_args())
