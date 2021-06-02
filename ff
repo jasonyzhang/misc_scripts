@@ -1,4 +1,4 @@
-#!/usr/bin/python36
+#!/usr/bin/python3
 """
 Wrapper for common ffmpeg commands.
 """
@@ -10,6 +10,10 @@ import subprocess
 def get_parser():
     parser = argparse.ArgumentParser(description="Wrapper for ffmpeg.")
     parser.add_argument("paths", nargs="+", help="Input paths followed by output")
+    parser.add_argument("--vsplit", default=0, type=int,
+        help="Number of videos to split vertically")
+    parser.add_argument("--hsplit", default=0, type=int,
+            help="Number of videos to split horizontally")
     parser.add_argument(
         "--vstack", action="store_true", help="Vertically concatenates videos"
     )
@@ -37,10 +41,11 @@ def main(args):
     inputs = args.paths[:-1]
     n_inputs = len(inputs)
     output = args.paths[-1]
-    extension = osp.splitext(output)[1]
+    output_name, extension = osp.splitext(output)
     for inp in inputs:
         cmd.extend(["-i", inp])
 
+    include_output = True
     if args.resize:
         # TODO(@jason): Add support for odd image dimensions if using libx264
         cmd.extend(["-filter:v", f'scale="{args.resize}" -c:a copy'])
@@ -93,7 +98,17 @@ def main(args):
         cmd.extend(["-filter_complex", filter_command, "-map", "[v]"])
         if extension == ".mp4":
             cmd.extend(["-c:v", "libx264", "-crf", "20"])
-    cmd.append(output)
+    elif args.hsplit > 0:
+        filter_command = ""
+        n = args.hsplit
+        for i in range(n):
+            filter_command += f"[0]crop=iw/{n}:ih:{i}*ow:0[c{i}];"
+        cmd.extend(["-filter_complex", filter_command[:-1]])  # drop last ;
+        for i in range(n):
+            cmd.extend(["-map", f"[c{i}]", f"{output_name}_{i}{extension}"])
+        include_output = False
+    if include_output:
+        cmd.append(output)
     run(cmd)
 
 
