@@ -10,10 +10,23 @@ import subprocess
 def get_parser():
     parser = argparse.ArgumentParser(description="Wrapper for ffmpeg.")
     parser.add_argument("paths", nargs="+", help="Input paths followed by output")
-    parser.add_argument("--vsplit", default=0, type=int,
-        help="Number of videos to split vertically")
-    parser.add_argument("--hsplit", default=0, type=int,
-            help="Number of videos to split horizontally")
+    parser.add_argument(
+        "--vsplit",
+        default=0,
+        type=int,
+        help="Number of videos to split vertically.",
+    )
+    parser.add_argument(
+        "--hsplit",
+        default=0,
+        type=int,
+        help="Number of videos to split horizontally.",
+    )
+    parser.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Reverses video",
+    )
     parser.add_argument(
         "--vstack", action="store_true", help="Vertically concatenates videos"
     )
@@ -49,6 +62,8 @@ def main(args):
     if args.resize:
         # TODO(@jason): Add support for odd image dimensions if using libx264
         cmd.extend(["-filter:v", f'scale="{args.resize}" -c:a copy'])
+    elif args.reverse:
+        cmd.extend(["-vf", "reverse", "-af", "areverse"])
     elif args.vstack or args.hstack or args.xstack:
         # Assume all videos have the same dimensions.
         # TODO(@jason): Add support for xstack
