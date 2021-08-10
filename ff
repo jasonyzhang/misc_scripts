@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python3.6
 """
 Wrapper for common ffmpeg commands.
 """
@@ -55,13 +55,15 @@ def main(args):
     n_inputs = len(inputs)
     output = args.paths[-1]
     output_name, extension = osp.splitext(output)
+    if n_inputs == 0:
+        print("Warning! no inputs")
     for inp in inputs:
         cmd.extend(["-i", inp])
 
     include_output = True
     if args.resize:
         # TODO(@jason): Add support for odd image dimensions if using libx264
-        cmd.extend(["-filter:v", f'scale="{args.resize}" -c:a copy'])
+        cmd.extend(["-vf", f"scale='{args.resize}'"])
     elif args.reverse:
         cmd.extend(["-vf", "reverse", "-af", "areverse"])
     elif args.vstack or args.hstack or args.xstack:
