@@ -42,6 +42,11 @@ def get_parser():
     )
     parser.add_argument("--xstack", default="", help="Custom stack, eg RxC.")
     parser.add_argument(
+        "--concat",
+        default="",
+        help="Concatenate videos consecutively. Needs a resolution iw:ih",
+    )
+    parser.add_argument(
         "-y",
         default=False,
         action="store_true",
@@ -71,7 +76,31 @@ def main(args):
         cmd.extend(["-i", inp])
 
     include_output = True
-    if args.resize:
+    if args.concat:
+        # https://stackoverflow.com/questions/57366845
+        filter_cmd = []
+        for i in range(n_inputs):
+            c = f"[{i}:v]scale={args.concat}:force_original_aspect_ratio=1,"
+            c += f"pad={args.concat}:(ow-iw)/2:(oh-ih)/2[v{i}];"
+            filter_cmd.append(c)
+        filter_command = "".join(filter_cmd)
+        for i in range(n_inputs):
+            filter_command += f"[v{i}]"
+        filter_command += f"concat=n={n_inputs}:v=1[v]"
+        cmd.extend(
+            [
+                "-filter_complex",
+                filter_command,
+                "-map",
+                "[v]",
+                "-c:v",
+                "libx264",
+                "-movflags",
+                "+faststart",
+            ]
+        )
+
+    elif args.resize:
         # TODO(@jason): Add support for odd image dimensions if using libx264
         cmd.extend(["-vf", f"scale='{args.resize}'"])
     elif args.reverse:
