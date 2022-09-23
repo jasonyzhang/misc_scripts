@@ -11,6 +11,9 @@ def get_parser():
     parser = argparse.ArgumentParser(description="Wrapper for ffmpeg.")
     parser.add_argument("paths", nargs="+", help="Input paths followed by output")
     parser.add_argument(
+        "--speed", type=float, help="Speed up or slow down video (2 = 2x faster)",
+    )
+    parser.add_argument(
         "--vsplit",
         default=0,
         type=int,
@@ -47,6 +50,12 @@ def get_parser():
         help="Concatenate videos consecutively. Needs a resolution iw:ih",
     )
     parser.add_argument(
+        "--compress", action="store_true", help="Compress video using x264 (using CRF)",
+    )
+    parser.add_argument(
+        "--crf", default=25, type=int, help="Constant Rate Factor for x264 compression",
+    )
+    parser.add_argument(
         "-y",
         default=False,
         action="store_true",
@@ -76,7 +85,11 @@ def main(args):
         cmd.extend(["-i", inp])
 
     include_output = True
-    if args.concat:
+    if args.speed:
+        cmd.extend(["-filter:v", f"setpts={1/args.speed:.03f}*PTS"])
+    elif args.compress:
+        cmd.extend(["-c:v", "libx264", "-preset", "slow", "-crf", str(args.crf), "-c:a", "copy"])
+    elif args.concat:
         # https://stackoverflow.com/questions/57366845
         filter_cmd = []
         for i in range(n_inputs):
@@ -154,6 +167,15 @@ def main(args):
         cmd.extend(["-filter_complex", filter_command, "-map", "[v]"])
         if extension == ".mp4":
             cmd.extend(["-c:v", "libx264", "-crf", "20"])
+    elif args.vsplit > 0:
+        filter_command = ""
+        n = args.vsplit
+        for i in range(n):
+            filter_command += f"[0]crop=iw:ih/{n}:0:{i}*oh[c{i}];"
+        cmd.extend(["-filter_complex", filter_command[:-1]])  # drop last ;
+        for i in range(n):
+            cmd.extend(["-map", f"[c{i}]", f"{output_name}_{i}{extension}"])
+        include_output = False
     elif args.hsplit > 0:
         filter_command = ""
         n = args.hsplit
