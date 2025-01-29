@@ -1,0 +1,137 @@
+#!/usr/bin/python3
+"""
+Wrapper for common ffmpeg commands (with a focus on gifs)
+"""
+import argparse
+import os.path as osp
+import subprocess
+
+
+def get_parser():
+    parser = argparse.ArgumentParser(description="Wrapper for ffmpeg.")
+    parser.add_argument("paths", nargs="+", help="Input paths followed by output")
+    parser.add_argument(
+        "--vstack", action="store_true", help="Vertically concatenates videos"
+    )
+    parser.add_argument(
+        "--hstack",
+        action="store_true",
+        help="Horizontally concatenates videos",
+    )
+    parser.add_argument("--xstack", default="", help="Custom stack, eg RxC.")
+    parser.add_argument(
+        "--fps",
+        default=None,
+        type=int,
+        help="fps"
+    )
+    parser.add_argument(
+        "--scale",
+        default=None,
+        type=str,
+        help="Size in format IW:IH. Use -1 for wildcard",
+    )
+    parser.add_argument(
+        "--palette",
+        default=1,
+        type=int,
+        help="palette quality. Higher is better quality/bigger size"
+    )
+    parser.add_argument(
+        "-y",
+        default=False,
+        action="store_true",
+        help="If True, overwrite existing",
+    )
+    return parser
+
+
+def run(cmd):
+    print("Running:", " ".join(cmd))
+    subprocess.run(cmd)
+
+
+def main(args):
+    cmd = ["ffmpeg"]
+    inputs = args.paths[:-1]
+    n_inputs = len(inputs)
+    output = args.paths[-1]
+    output_name, extension = osp.splitext(output)
+    if n_inputs == 0:
+        print("Warning! no inputs")
+
+    if args.y:
+        cmd.append("-y")
+
+    for inp in inputs:
+        cmd.extend(["-i", inp])
+
+    filters = []
+    
+
+    include_output = True
+
+    if args.fps is not None:
+        filters.append(f"fps={args.fps}")
+    if args.scale is not None:
+        filters.append(f"scale={args.scale}:flags=lanczos")       
+    if args.vstack or args.hstack or args.xstack:
+        # Assume all videos have the same dimensions.
+        # TODO(@jason): Add support for xstack
+        filter_command = "".join(f"[{i}:v]" for i in range(n_inputs))
+        if args.vstack:
+            filters.append(f"vstack=inputs={n_inputs}[v]")
+        elif args.hstack:
+            filters.append(f"hstack=inputs={n_inputs}[v]")
+        elif args.xstack:
+            # should enter as NUM_ROWSxNUM_COLS, eg 3x2.
+            # videos will be placed in raster order.
+            # xstack syntax is unreadable lmao
+            # https://ffmpeg.org/ffmpeg-filters.html#xstack
+            num_rows, num_cols = args.xstack.split("x")
+            num_rows = int(num_rows)
+            num_cols = int(num_cols)
+
+            layouts = [[("", "") for _ in range(num_cols)] for _ in range(num_rows)]
+            for r in range(num_rows):
+                for c in range(num_cols):
+                    new_x = "0"
+                    new_y = "0"
+                    if r == 0 and c == 0:
+                        pass
+                    elif r == 0:
+                        new_x = layouts[r][c - 1][0] + f"+w{c - 1}"
+                    elif c == 0:
+                        new_y = layouts[r - 1][c][1] + f"+h{(r - 1) * num_rows}"
+                    else:
+                        new_x = layouts[r - 1][c][0]
+                        new_y = layouts[r][c - 1][1]
+                    layouts[r][c] = (new_x, new_y)
+            layouts_flat = [f"{x}_{y}" for sublist in layouts for x, y in sublist]
+            layout_string = "|".join(layouts_flat[:n_inputs])
+            filters.append(f"xstack=inputs={n_inputs}:layout={layout_string}[v]")
+    
+    # palette quality
+    if args.palette == 0:
+        # no palette
+        pass
+    elif args.palette == 1:
+        # palette of size 64
+        filters.append("split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse")
+    elif args.palette == 2:
+        # palette of size 256
+        filters.append("split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse")
+    elif args.palette == 3:
+        # Construct a new palette for every frame
+        filters.append("split[s0][s1];[s0]palettegen=stats_mode=single[p];[s1][p]paletteuse=new=1")
+
+    if len(filters) > 0:
+        cmd.extend(["-vf", ",".join(filters)])
+ 
+    if include_output:
+        cmd.append(output)
+    run(cmd)
+
+
+if __name__ == "__main__":
+    main(get_parser().parse_args())
